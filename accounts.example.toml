@@ -1,0 +1,10 @@
+# Copy to local/accounts.toml (gitignored) and fill in your own accounts.
+# The table key is the account's main name; aliases are other names you'll use in chat.
+# Matching ignores case, spaces and hyphens, so "Side Project" matches "sideproject".
+
+[accounts.personal]
+email = "you@gmail.com"
+
+[accounts.work]
+email = "you@yourcompany.com"
+aliases = ["office"]

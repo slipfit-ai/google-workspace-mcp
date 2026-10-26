@@ -1,0 +1,45 @@
+[project]
+name = "google-workspace-mcp"
+version = "0.1.0"
+description = "Local MCP server giving Claude Code guarded access to several Google accounts' Gmail, Calendar and Drive"
+readme = "README.md"
+authors = [
+    { name = "Josh Mischung" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "google-api-python-client>=2.201.0",
+    "google-auth-oauthlib>=1.5.0",
+    "loguru>=0.7.3",
+    "mcp>=2.3.0",
+]
+
+[project.scripts]
+google-workspace-mcp = "google_workspace_mcp:main"
+gw-auth = "google_workspace_mcp.auth:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+markers = ["live: hits real Google accounts (needs 1Password + Touch ID)"]
+addopts = "-m 'not live'"

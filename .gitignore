@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Personal data: account emails, aliases, anything tied to Josh (garage/CLAUDE.md)
+local/
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
