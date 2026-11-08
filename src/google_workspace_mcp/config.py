@@ -52,17 +52,17 @@ def load_accounts(path: Path | None = None) -> dict[str, Account]:
     }
 
 
-def normalise(name: str) -> str:
+def normalize(name: str) -> str:
     """Lower-case and collapse spaces, hyphens and underscores so 'Side Project' == 'sideproject'."""
     return "".join(ch for ch in name.lower() if ch.isalnum() or ch == "@" or ch == ".")
 
 
 def resolve(name: str, accounts: dict[str, Account]) -> Account:
     """Find an account by key, alias or email; raise with the valid names if none match."""
-    wanted = normalise(name)
+    wanted = normalize(name)
     for account in accounts.values():
         names = (account.key, account.email, *account.aliases)
-        if wanted in {normalise(n) for n in names}:
+        if wanted in {normalize(n) for n in names}:
             return account
     valid = ", ".join(sorted(n for a in accounts.values() for n in (a.key, *a.aliases)))
     raise ValueError(f"Unknown account '{name}'. Use one of: {valid}.")

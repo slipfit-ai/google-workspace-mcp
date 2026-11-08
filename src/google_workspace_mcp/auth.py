@@ -15,7 +15,7 @@ from google_workspace_mcp import vault
 from google_workspace_mcp.config import SCOPES, load_accounts, resolve
 
 
-def authorise(name: str) -> None:
+def authorize(name: str) -> None:
     """Run consent for one account and store its refresh token."""
     account = resolve(name, load_accounts())
     flow = InstalledAppFlow.from_client_config(vault.read_client_config(), SCOPES)
@@ -53,10 +53,10 @@ def authorise(name: str) -> None:
 
 
 def main() -> None:
-    """CLI entry point: authorise each account named on the command line."""
+    """CLI entry point: authorize each account named on the command line."""
     names = sys.argv[1:]
     if not names:
         accounts = ", ".join(load_accounts())
         raise SystemExit(f"Usage: gw-auth <account> [<account> ...]  (accounts: {accounts})")
     for name in names:
-        authorise(name)
+        authorize(name)

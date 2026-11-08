@@ -1,5 +1,5 @@
 """Calendar tools. Guests are out of reach by design: no tool sets attendees, and events
-that already have guests, or that another calendar organises, can't be changed or deleted."""
+that already have guests, or that another calendar organizes, can't be changed or deleted."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -90,7 +90,7 @@ def _describe(event: dict[str, Any], full: bool = False) -> str:
 
 
 def _editable(svc: Any, calendar_id: str, event_id: str, verb: str) -> dict[str, Any]:
-    """Fetch an event and refuse if it has guests or another calendar organises it."""
+    """Fetch an event and refuse if it has guests or another calendar organizes it."""
     event = svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
     if event.get("attendees"):
         raise ToolError(
@@ -100,7 +100,7 @@ def _editable(svc: Any, calendar_id: str, event_id: str, verb: str) -> dict[str,
         )
     if not event.get("organizer", {}).get("self"):
         raise ToolError(
-            f"Refused to {verb} {event.get('summary', event_id)!r}: it is organised by "
+            f"Refused to {verb} {event.get('summary', event_id)!r}: it is organized by "
             f"{event.get('organizer', {}).get('email', 'another calendar')}, not this calendar."
         )
     return event
@@ -212,7 +212,7 @@ def update_event(
     time_zone: str | None = None,
 ) -> str:
     """Change an event's title, time, description or location; omitted fields are kept.
-    Refused for events with guests or organised by another calendar. For a recurring event,
+    Refused for events with guests or organized by another calendar. For a recurring event,
     an instance id changes that occurrence only."""
     svc, key = _calendar(account)
     _editable(svc, calendar_id, event_id, "update")
@@ -239,7 +239,7 @@ def update_event(
 @google_errors
 def delete_event(account: str, event_id: str, calendar_id: str = "primary") -> str:
     """Delete an event. It goes to Google Calendar's Trash (restorable there for 30 days).
-    Refused for events with guests or organised by another calendar."""
+    Refused for events with guests or organized by another calendar."""
     svc, key = _calendar(account)
     event = _editable(svc, calendar_id, event_id, "delete")
     svc.events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates="none").execute()
