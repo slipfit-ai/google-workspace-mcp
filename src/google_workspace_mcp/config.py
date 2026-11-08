@@ -53,7 +53,7 @@ def load_accounts(path: Path | None = None) -> dict[str, Account]:
 
 
 def normalize(name: str) -> str:
-    """Lower-case and collapse spaces, hyphens and underscores so 'Side Project' == 'sideproject'."""
+    """Lower-case and drop spaces, hyphens and underscores: 'Side Project' == 'sideproject'."""
     return "".join(ch for ch in name.lower() if ch.isalnum() or ch == "@" or ch == ".")
 
 
