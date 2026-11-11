@@ -12,13 +12,40 @@ Video: _coming soon_
 |---|---|---|
 | Gmail | `search_threads`, `get_thread`, `list_drafts`, `create_draft`, `list_labels`, `modify_thread_labels`, `archive_thread`, `trash_thread`, `untrash_thread` | **No send or forward tool.** Claude writes drafts; you send them. Trash is recoverable. |
 | Calendar | `list_calendars`, `list_events`, `get_event`, `create_event`, `update_event`, `delete_event` | No tool can add guests. Events that have guests, or that someone else organizes, can't be changed or deleted. No notifications are sent. |
-| Drive | `search_files`, `get_file_metadata`, `read_file_content`, `move_file`, `trash_file`, `untrash_file` | No tool writes file content, uploads or shares. Move and trash only work on files the account owns, in My Drive. Shared drives are read-only. |
+| Drive | `search_files`, `get_file_metadata`, `read_file_content`, `create_folder`, `move_file`, `trash_file`, `untrash_file` | Writes only touch internal content (see [Write guard](#write-guard)). No tool shares or changes permissions. |
+| Docs & Sheets | `create_doc`, `create_sheet`, `append_doc_text`, `update_sheet_range` | Same write guard. Sheet values are stored as text, never run as formulas. Markdown with images is refused. |
 
 Plus `list_accounts`, which lists the configured accounts.
 
 Everything read from an email, event or file comes back wrapped in `<untrusted_content>` markers,
 and the server tells Claude never to follow instructions found inside them. HTML email has hidden
 elements stripped first, so text a sender hid from you is also hidden from Claude.
+
+### Write guard
+
+Anything the account can see can be read. Only **internal** content can be created in, written
+to, moved or trashed:
+
+- **My Drive items:** every owner's address is in the account's `internal_domains` (for an
+  account without them, such as gmail.com, the owner must be the account itself). Files owned by
+  a teammate count; files shared in from anyone else are read-only.
+- **Shared-drive items:** the drive belongs to a domain this account administers, checked with
+  an admin-access lookup. A shared drive from another organization is read-only even when the
+  account is a member. **This needs a Workspace admin account**; for a non-admin account, every
+  shared drive reads as external and is refused.
+- **New items and moves:** the destination folder must pass the same check, since a new file
+  inherits its folder's sharing.
+
+Internal content that a person has shared outside the organization stays writable: that share
+was a human decision. The guard exists so an instruction injected through outside content can't
+use outside-controlled files as a drop box. That's also why the server has no sharing tool.
+
+Two deliberate locks close exfiltration paths that work even inside the organization. Both stay
+until they get in the way; then they're worth designing around, not removing:
+
+- **Sheet values are plain text.** Writes are RAW, so `=IMPORTDATA("https://…")` is stored as
+  text: a live formula could send sheet data to an outside URL. No tool can write a formula.
+- **Markdown images are refused** in `create_doc`: Google fetches image URLs on import.
 
 **Secrets live only in 1Password.** The OAuth client and each account's refresh token are stored
 in a 1Password vault and read through the `op` CLI. Nothing is written to disk, and the first tool
@@ -39,8 +66,9 @@ You only do this once, signed in as any one of your accounts. In Chrome, check t
 top right before you create anything: the console opens as whichever Google account it likes.
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project.
-2. **APIs & Services → Library**: enable the **Gmail API**, **Google Calendar API** and
-   **Google Drive API**.
+2. **APIs & Services → Library**: enable the **Gmail API**, **Google Calendar API**,
+   **Google Drive API**, **Google Docs API** and **Google Sheets API**. Docs and Sheets need no
+   extra scopes; the Drive scope covers them.
 3. **Google Auth Platform → Branding**: set up the app as **External**. Give it a name and
    your email.
 4. **Audience**: add every account you'll connect as a **test user**.
@@ -94,6 +122,7 @@ email = "you@gmail.com"
 [accounts.work]
 email = "you@yourcompany.com"
 aliases = ["office"]
+internal_domains = ["yourcompany.com"]  # see "Write guard"; leave out for gmail.com
 ```
 
 Then authorize each account:
@@ -149,3 +178,7 @@ Turning a connector off in `/mcp` only applies to the current project.
 uv run ruff check && uv run pyright
 uv run python tests/smoke_stdio.py   # starts the server over stdio and lists its tools
 ```
+
+The write guard has live tests against real accounts. They need three accounts and a set of
+cross-account fixtures; `tests/live_fixtures.py` builds and tears them down and says what's
+required.

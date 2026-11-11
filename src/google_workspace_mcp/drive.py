@@ -1,14 +1,18 @@
-"""Drive tools: find and read anything the account can see; move and trash only what it owns.
+"""Drive tools: find and read anything the account can see; change only internal items.
 
-No tool writes file content or shares. Shared-drive items are read-only in v1.
+Internal means owned by the account's organization (see `require_internal`). Content shared in
+from outside stays read-only, so an injected instruction can't use it as a drop box. No tool
+shares or changes permissions: every outward share must stay a human's decision.
 """
 
 from typing import Any
 
+from googleapiclient.errors import HttpError
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from google_workspace_mcp.app import app
+from google_workspace_mcp.config import Account
 from google_workspace_mcp.google import account, google_errors, service
 from google_workspace_mcp.untrusted import fence
 
@@ -28,12 +32,13 @@ FIELDS = (
 )
 
 READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+CREATE = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
 
 
-def _drive(name: str) -> tuple[Any, str]:
-    """The Drive client and resolved account key for a chat-style account name."""
+def drive_client(name: str) -> tuple[Any, Account]:
+    """The Drive client and resolved account for a chat-style account name."""
     acct = account(name)
-    return service(acct, "drive", "v3"), acct.key
+    return service(acct, "drive", "v3"), acct
 
 
 def _get(svc: Any, file_id: str) -> dict[str, Any]:
@@ -58,18 +63,41 @@ def _describe(f: dict[str, Any]) -> str:
     )
 
 
-def _owned(f: dict[str, Any], verb: str) -> dict[str, Any]:
-    """Refuse unless this account owns the item and it's in My Drive, not a shared drive."""
-    if f.get("driveId"):
-        raise ToolError(
-            f"Refused to {verb} {f['name']!r}: it's in a shared drive (read-only in v1)."
-        )
-    if not f.get("ownedByMe"):
-        owner = ", ".join(o["emailAddress"] for o in f.get("owners", [])) or "someone else"
-        raise ToolError(
-            f"Refused to {verb} {f['name']!r}: it's owned by {owner}, not this account."
-        )
-    return f
+def require_internal(svc: Any, acct: Account, f: dict[str, Any], verb: str) -> dict[str, Any]:
+    """Refuse unless the item belongs to this account's organization.
+
+    Shared-drive items have no owner, so the drive itself is checked: an admin-access lookup
+    only succeeds when the drive belongs to a domain this account administers. In My Drive,
+    every owner address must be internal (`Account.is_internal`); a hidden address fails.
+    """
+    if drive_id := f.get("driveId"):
+        try:
+            svc.drives().get(driveId=drive_id, useDomainAdminAccess=True, fields="id").execute()
+        except HttpError as exc:
+            if exc.status_code not in (403, 404):
+                raise
+            raise ToolError(
+                f"Refused to {verb} {f['name']!r}: its shared drive belongs to another "
+                "organization (or this account isn't an admin of the drive's domain). "
+                "It's read-only here."
+            ) from exc
+        return f
+    owners = [o.get("emailAddress", "") for o in f.get("owners", [])]
+    if owners and all(acct.is_internal(o) for o in owners):
+        return f
+    shown = ", ".join(o or "(hidden address)" for o in owners) or "an unknown owner"
+    raise ToolError(
+        f"Refused to {verb} {f['name']!r}: it's owned by {shown}, outside {acct.key}. "
+        "Content shared in from outside is read-only here."
+    )
+
+
+def internal_folder(svc: Any, acct: Account, folder_id: str, verb: str) -> dict[str, Any]:
+    """A folder (or shared-drive root) the account may add items to."""
+    folder = _get(svc, folder_id)
+    if folder["mimeType"] != FOLDER:
+        raise ToolError(f"{folder['name']!r} is not a folder.")
+    return require_internal(svc, acct, folder, verb)
 
 
 @app.tool(annotations=READ)
@@ -85,7 +113,8 @@ def search_files(
     first, Trash excluded. `text` searches names and contents; `drive_query` takes Drive
     query syntax (e.g. "mimeType = 'application/vnd.google-apps.folder'",
     "'<folder id>' in parents", "sharedWithMe"). Both may be combined."""
-    svc, key = _drive(account)
+    svc, acct = drive_client(account)
+    key = acct.key
     clauses = ["trashed = false"]
     if text:
         escaped = text.replace("\\", "\\\\").replace("'", "\\'")
@@ -118,8 +147,8 @@ def search_files(
 @google_errors
 def get_file_metadata(account: str, file_id: str) -> str:
     """A file's or folder's name, type, size, owner, parents, location and link."""
-    svc, key = _drive(account)
-    return fence(f"drive:{key}:{file_id}", _describe(_get(svc, file_id)))
+    svc, acct = drive_client(account)
+    return fence(f"drive:{acct.key}:{file_id}", _describe(_get(svc, file_id)))
 
 
 @app.tool(annotations=READ)
@@ -128,7 +157,8 @@ def read_file_content(account: str, file_id: str) -> str:
     """Read a file as text: Google Docs and Slides as plain text, Sheets as CSV (first sheet
     only), and plain-text files (txt, md, csv, json, code). Other types (PDF, images, Office
     files) are refused; their metadata is still available."""
-    svc, key = _drive(account)
+    svc, acct = drive_client(account)
+    key = acct.key
     f = _get(svc, file_id)
     mime = f["mimeType"]
     if mime in EXPORTS:
@@ -146,18 +176,27 @@ def read_file_content(account: str, file_id: str) -> str:
     return fence(f"drive:{key}:{f['name']}{note}", text)
 
 
+@app.tool(annotations=CREATE)
+@google_errors
+def create_folder(account: str, name: str, parent_id: str = "root") -> str:
+    """Create a folder. parent_id is a folder id, a shared drive id, or "root" (top of My
+    Drive). The parent must belong to this account's organization; see search_files."""
+    svc, acct = drive_client(account)
+    parent = internal_folder(svc, acct, parent_id, "create a folder in")
+    body = {"name": name, "mimeType": FOLDER, "parents": [parent["id"]]}
+    f = svc.files().create(body=body, fields=FIELDS, supportsAllDrives=True).execute()
+    return f"Created folder {f['name']!r} in {parent['name']!r} ({acct.key}).\n{_describe(f)}"
+
+
 @app.tool(annotations=ToolAnnotations(read_only_hint=False, idempotent_hint=True))
 @google_errors
 def move_file(account: str, file_id: str, folder_id: str) -> str:
-    """Move a file or folder into another folder. Both must be owned by this account and in
-    My Drive; anything else is refused. Use "root" as folder_id for the top of My Drive."""
-    svc, key = _drive(account)
-    f = _owned(_get(svc, file_id), "move")
-    folder = _get(svc, folder_id)
-    if folder["mimeType"] != FOLDER:
-        raise ToolError(f"{folder['name']!r} is not a folder.")
-    if folder_id != "root":
-        _owned(folder, "move files into")
+    """Move a file or folder into another folder. Both must belong to this account's
+    organization; anything shared in from outside is refused. Use "root" for the top of My
+    Drive, or a shared drive id for the top of that drive."""
+    svc, acct = drive_client(account)
+    f = require_internal(svc, acct, _get(svc, file_id), "move")
+    folder = internal_folder(svc, acct, folder_id, "move files into")
     moved = (
         svc.files()
         .update(
@@ -165,28 +204,29 @@ def move_file(account: str, file_id: str, folder_id: str) -> str:
             addParents=folder["id"],
             removeParents=",".join(f.get("parents", [])),
             fields=FIELDS,
+            supportsAllDrives=True,
         )
         .execute()
     )
-    return f"Moved {moved['name']!r} into {folder['name']!r} in {key}."
+    return f"Moved {moved['name']!r} into {folder['name']!r} in {acct.key}."
 
 
 @app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True))
 @google_errors
 def trash_file(account: str, file_id: str) -> str:
-    """Move a file or folder this account owns to Drive's Trash (restorable with
-    untrash_file for 30 days). Nothing is permanently deleted by this server."""
-    svc, key = _drive(account)
-    f = _owned(_get(svc, file_id), "trash")
-    svc.files().update(fileId=file_id, body={"trashed": True}).execute()
-    return f"Moved {f['name']!r} to Trash in {key} (restorable for 30 days)."
+    """Move a file or folder that belongs to this account's organization to Trash
+    (restorable with untrash_file for 30 days). Nothing is permanently deleted."""
+    svc, acct = drive_client(account)
+    f = require_internal(svc, acct, _get(svc, file_id), "trash")
+    svc.files().update(fileId=file_id, body={"trashed": True}, supportsAllDrives=True).execute()
+    return f"Moved {f['name']!r} to Trash in {acct.key} (restorable for 30 days)."
 
 
 @app.tool(annotations=ToolAnnotations(read_only_hint=False, idempotent_hint=True))
 @google_errors
 def untrash_file(account: str, file_id: str) -> str:
-    """Restore a file or folder this account owns from Drive's Trash to its original folder."""
-    svc, key = _drive(account)
-    f = _owned(_get(svc, file_id), "restore")
-    svc.files().update(fileId=file_id, body={"trashed": False}).execute()
-    return f"Restored {f['name']!r} from Trash in {key}."
+    """Restore a file or folder that belongs to this account's organization from Trash."""
+    svc, acct = drive_client(account)
+    f = require_internal(svc, acct, _get(svc, file_id), "restore")
+    svc.files().update(fileId=file_id, body={"trashed": False}, supportsAllDrives=True).execute()
+    return f"Restored {f['name']!r} from Trash in {acct.key}."

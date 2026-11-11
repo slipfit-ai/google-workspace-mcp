@@ -9,12 +9,14 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+# Consumer domains: anyone can own a file there, so they never count as internal.
+PUBLIC_DOMAINS = {"gmail.com", "googlemail.com"}
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "local" / "accounts.toml"
 
 # Gmail: read, label, archive, trash, drafts. The token could send; the server exposes no
 # send tool. Calendar: events read/write plus the calendar list. Drive: full scope, needed
-# to move files the app didn't create.
+# to move files the app didn't create; it also covers the Docs and Sheets APIs.
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.events",
@@ -25,11 +27,20 @@ SCOPES = [
 
 @dataclass(frozen=True)
 class Account:
-    """One Google account and the names it answers to."""
+    """One Google account, the names it answers to, and the domains its organization owns.
+
+    With no internal domains (a consumer account), only the account itself counts as internal.
+    """
 
     key: str
     email: str
     aliases: tuple[str, ...]
+    internal_domains: tuple[str, ...] = ()
+
+    def is_internal(self, email: str) -> bool:
+        """Whether an owner address belongs to this account or its organization."""
+        email = email.lower()
+        return email == self.email.lower() or email.rsplit("@", 1)[-1] in self.internal_domains
 
 
 def config_path() -> Path:
@@ -46,10 +57,22 @@ def load_accounts(path: Path | None = None) -> dict[str, Account]:
             "and fill in your accounts."
         )
     raw = tomllib.loads(path.read_text())["accounts"]
-    return {
-        key: Account(key=key, email=entry["email"], aliases=tuple(entry.get("aliases", [])))
+    accounts = {
+        key: Account(
+            key=key,
+            email=entry["email"],
+            aliases=tuple(entry.get("aliases", [])),
+            internal_domains=tuple(d.lower() for d in entry.get("internal_domains", [])),
+        )
         for key, entry in raw.items()
     }
+    for a in accounts.values():
+        if public := PUBLIC_DOMAINS & set(a.internal_domains):
+            raise ValueError(
+                f"Account '{a.key}' lists {sorted(public)} as internal domains. Anyone can own "
+                "files there; remove it so only the account itself counts as internal."
+            )
+    return accounts
 
 
 def normalize(name: str) -> str:

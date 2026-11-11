@@ -1,6 +1,10 @@
 # Copy to local/accounts.toml (gitignored) and fill in your own accounts.
 # The table key is the account's main name; aliases are other names you'll use in chat.
 # Matching ignores case, spaces and hyphens, so "Side Project" matches "sideproject".
+#
+# internal_domains: Drive files owned by these domains (and shared drives this account
+# administers) can be written to. Everything else is read-only. Leave it out for a gmail.com
+# account: then only files the account itself owns can be written to.
 
 [accounts.personal]
 email = "you@gmail.com"
@@ -8,3 +12,4 @@ email = "you@gmail.com"
 [accounts.work]
 email = "you@yourcompany.com"
 aliases = ["office"]
+internal_domains = ["yourcompany.com"]
