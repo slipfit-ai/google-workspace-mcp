@@ -14,6 +14,7 @@ Video: _coming soon_
 | Calendar | `list_calendars`, `list_events`, `get_event`, `create_event`, `update_event`, `delete_event` | No tool can add guests. Events that have guests, or that someone else organizes, can't be changed or deleted. No notifications are sent. |
 | Drive | `search_files`, `get_file_metadata`, `read_file_content`, `create_folder`, `move_file`, `trash_file`, `untrash_file` | Writes only touch internal content (see [Write guard](#write-guard)). No tool shares or changes permissions. |
 | Docs & Sheets | `create_doc`, `create_sheet`, `append_doc_text`, `update_sheet_range` | Same write guard. Sheet values are stored as text, never run as formulas. Markdown with images is refused. |
+| File transfer | `upload_file`, `download_file` | Uploads go only into internal folders, as new unconverted files, and refuse secrets. Downloads land in `~/Downloads`, quarantined. See [File transfer](#file-transfer). |
 
 Plus `list_accounts`, which lists the configured accounts.
 
@@ -46,6 +47,30 @@ until they get in the way; then they're worth designing around, not removing:
 - **Sheet values are plain text.** Writes are RAW, so `=IMPORTDATA("https://…")` is stored as
   text: a live formula could send sheet data to an outside URL. No tool can write a formula.
 - **Markdown images are refused** in `create_doc`: Google fetches image URLs on import.
+
+### File transfer
+
+Any file type can move between Drive and the local disk. The guards are about where a file comes
+from and whether it carries a secret, not its type:
+
+- **Local paths** must be under your home folder, outside every dot-folder and `~/Library`
+  (iCloud Drive and `~/Library/CloudStorage` are allowed). On macOS those hold nearly every
+  credential: `~/.ssh`, `~/.aws`, `~/.config`, Keychains, browser profiles. Symlinks are resolved
+  before the check.
+- **Uploads refuse secrets**, by name (`*.pem`, `*.key`, `id_rsa*`, `client_secret*.json`, …) and
+  by content (a PEM private key, or JSON with a real-looking `refresh_token` or `client_secret`),
+  so a key renamed to `.pdf` is caught too. SVGs that reference outside URLs are refused for the
+  same reason Markdown images are.
+- **Uploads only create.** The destination passes the [write guard](#write-guard); the file is
+  stored as-is (a PDF stays a PDF), and a name already in the folder is refused rather than
+  duplicated.
+- **Downloads** default to `~/Downloads`. Drive names are cleaned to a flat name (no `../`), an
+  existing file is never overwritten, and the file is never executable and carries macOS's
+  quarantine flag like a browser download. Google Docs, Sheets and Slides export as Office files.
+- Both directions cap at 10 MB and log account, path, file id, size and sha256.
+
+Keep `upload_file` on "ask" in Claude Code: the prompt shows the local path and folder, and it's
+the human checkpoint for what leaves the machine.
 
 **Secrets live only in 1Password.** The OAuth client and each account's refresh token are stored
 in a 1Password vault and read through the `op` CLI. Nothing is written to disk, and the first tool
