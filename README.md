@@ -182,3 +182,8 @@ uv run python tests/smoke_stdio.py   # starts the server over stdio and lists it
 The write guard has live tests against real accounts. They need three accounts and a set of
 cross-account fixtures; `tests/live_fixtures.py` builds and tears them down and says what's
 required.
+
+## License
+
+[MIT](LICENSE). You use your own Google Cloud OAuth client, so your use of the Google APIs is
+governed by [Google's API Terms of Service](https://developers.google.com/terms).

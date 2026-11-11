@@ -3,6 +3,8 @@ name = "google-workspace-mcp"
 version = "0.1.0"
 description = "Local MCP server giving Claude Code guarded access to several Google accounts' Gmail, Calendar and Drive"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Josh Mischung" }
 ]
